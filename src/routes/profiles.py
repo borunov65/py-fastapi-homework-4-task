@@ -1,11 +1,12 @@
-from fastapi import APIRouter, status, Depends, HTTPException
+from fastapi import APIRouter, status, Depends, HTTPException, UploadFile
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from jose import JWTError
 from pydantic import HttpUrl, TypeAdapter
 
 from database import get_db, UserModel, UserProfileModel
-from schemas.profiles import UserProfileResponseSchema, UserProfileSchema
+from database.models.accounts import UserGroupEnum
+from schemas.profiles import ProfileResponseSchema, UserProfileSchema
 from config.dependencies import get_s3_storage_client, get_jwt_auth_manager
 from storages import S3StorageInterface
 from security.token_manager import JWTAuthManager
@@ -15,9 +16,12 @@ from exceptions.security import TokenExpiredError
 router = APIRouter()
 
 
+ALLOWED_IMAGE_TYPES = {"image/jpeg": ".jpg", "image/png": ".png"}
+
+
 @router.post(
     "/users/{user_id}/profile/",
-    response_model=UserProfileResponseSchema,
+    response_model=ProfileResponseSchema,
     summary="User profile creation",
     description="Implement logic for token validation, authorization, "
                 "database storage, and avatar loading.",
@@ -132,14 +136,19 @@ async def create_profile(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="User not found or not active."
         )
-
-    current_user_id = payload["user_id"]
+    try:
+        current_user_id = payload["user_id"]
+    except KeyError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid token: 'user_id' is missing."
+        )
 
     if user_id != current_user_id:
         stmt = select(UserModel).where(UserModel.id == current_user_id)
         result = await db.execute(stmt)
         current_user = result.scalars().first()
-        if not current_user or current_user.group_id != 3:  # 3 = адмін
+        if not current_user or current_user.group_id != UserGroupEnum.ADMIN.value:
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="You don't have permission to edit this profile."
@@ -158,14 +167,24 @@ async def create_profile(
     await user_data.avatar.seek(0)
     file_bytes = await user_data.avatar.read()
 
-    avatar_key = f"avatars/{user.id}_avatar.jpg"
+    avatar_file: UploadFile = user_data.avatar
+
+    if avatar_file.content_type not in ALLOWED_IMAGE_TYPES:
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid avatar file type. Only JPEG and PNG are allowed."
+        )
+
+    extension = ALLOWED_IMAGE_TYPES[avatar_file.content_type]
+
+    avatar_key = f"avatars/{user.id}_avatar{extension}"
 
     try:
         await s3_client.upload_file(file_name=avatar_key, file_data=file_bytes)
 
         avatar_db_value = avatar_key
 
-        avatar_url = await s3_client.get_file_url(avatar_key)
+        avatar_url = await s3_client.get_file_url(file_name=avatar_key)
 
     except Exception:
         raise HTTPException(
@@ -187,7 +206,7 @@ async def create_profile(
     await db.commit()
     await db.refresh(profile)
 
-    return UserProfileResponseSchema(
+    return ProfileResponseSchema(
         id=profile.id,
         user_id=profile.user_id,
         first_name=profile.first_name or "",

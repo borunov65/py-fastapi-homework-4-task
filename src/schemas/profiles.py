@@ -93,7 +93,7 @@ class UserProfileSchema(BaseModel):
         return value
 
 
-class UserProfileResponseSchema(BaseModel):
+class ProfileResponseSchema(BaseModel):
     id: int
     user_id: int
     first_name: str
@@ -103,5 +103,4 @@ class UserProfileResponseSchema(BaseModel):
     info: str
     avatar: HttpUrl
 
-    class Config:
-        orm_mode = True
+    model_config = {"from_attributes": True}

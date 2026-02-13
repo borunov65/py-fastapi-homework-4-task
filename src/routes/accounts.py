@@ -128,13 +128,14 @@ async def register_user(
             f"?token={activation_token.token}"
         )
 
+        await db.commit()
+
         background_tasks.add_task(
             email_sender.send_activation_email,
             str(new_user.email),
             activation_link
         )
 
-        await db.commit()
         await db.refresh(new_user)
     except SQLAlchemyError as e:
         await db.rollback()
@@ -302,13 +303,13 @@ async def request_password_reset_token(
         f"?token={reset_token.token}"
     )
 
+    await db.commit()
+
     background_tasks.add_task(
         email_sender.send_password_reset_email,
         str(user.email),
         password_reset_link
     )
-
-    await db.commit()
 
     return MessageResponseSchema(
         message="If you are registered, you will receive an email with instructions."
