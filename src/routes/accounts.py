@@ -125,7 +125,7 @@ async def register_user(
 
         activation_link = (
             f"http://127.0.0.1:8000/api/v1/accounts/activate/"
-            f"?token={activation_token.token}"
+            f"?token={activation_token.token}&email={new_user.email}"
         )
 
         await db.commit()
@@ -221,7 +221,7 @@ async def activate_account(
     now_utc = datetime.now(timezone.utc)
     if not token_record or cast(datetime, token_record.expires_at).replace(tzinfo=timezone.utc) < now_utc:
         if token_record:
-            await db.delete(token_record)
+            await db.run_sync(lambda s: s.delete(token_record))
             await db.commit()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -236,7 +236,7 @@ async def activate_account(
         )
 
     user.is_active = True
-    await db.delete(token_record)
+    await db.run_sync(lambda s: s.delete(token_record))
     await db.commit()
 
     login_link = (

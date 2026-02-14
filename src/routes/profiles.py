@@ -167,6 +167,12 @@ async def create_profile(
     await user_data.avatar.seek(0)
     file_bytes = await user_data.avatar.read()
 
+    if len(file_bytes) > 1_048_576:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Avatar must not exceed 1MB."
+        )
+
     avatar_file: UploadFile = user_data.avatar
 
     if avatar_file.content_type not in ALLOWED_IMAGE_TYPES:
@@ -175,22 +181,25 @@ async def create_profile(
             detail="Invalid avatar file type. Only JPEG and PNG are allowed."
         )
 
-    extension = ALLOWED_IMAGE_TYPES[avatar_file.content_type]
+    avatar_db_value = None
+    avatar_url = None
 
-    avatar_key = f"avatars/{user.id}_avatar{extension}"
+    if user_data.avatar:
+        extension = ALLOWED_IMAGE_TYPES[user_data.avatar.content_type]
+        avatar_key = f"avatars/{user.id}_avatar{extension}"
 
-    try:
-        await s3_client.upload_file(file_name=avatar_key, file_data=file_bytes)
+        try:
+            await s3_client.upload_file(
+                file_name=avatar_key,
+                file_data=file_bytes
+            )
+            avatar_db_value = avatar_key
 
-        avatar_db_value = avatar_key
-
-        avatar_url = await s3_client.get_file_url(file_name=avatar_key)
-
-    except Exception:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Failed to upload avatar. Please try again later."
-        )
+        except Exception:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Failed to upload avatar. Please try again later."
+            )
 
     profile = UserProfileModel(
         user_id=user_id,
@@ -206,6 +215,9 @@ async def create_profile(
     await db.commit()
     await db.refresh(profile)
 
+    if profile.avatar:
+        avatar_url = await s3_client.get_file_url(profile.avatar)
+
     return ProfileResponseSchema(
         id=profile.id,
         user_id=profile.user_id,
@@ -214,5 +226,5 @@ async def create_profile(
         gender=profile.gender,
         date_of_birth=profile.date_of_birth,
         info=profile.info or "",
-        avatar = TypeAdapter(HttpUrl).validate_python(avatar_url)
+        avatar=TypeAdapter(HttpUrl).validate_python(avatar_url) if avatar_url else None
     )

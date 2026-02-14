@@ -20,6 +20,8 @@ class UserProfileSchema(BaseModel):
     info: str
     avatar: UploadFile
 
+    model_config = {"from_attributes": True}
+
     @classmethod
     def as_form(
             cls,
